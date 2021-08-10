@@ -1,42 +1,76 @@
 # -*- coding: utf-8 -*-
 """Module consists of the only one function methods_importer."""
+import os
 import re
+import warnings
 
 import nltk
 import numpy as np
 import pandas as pd
-# import warnings
 from nltk.stem.snowball import SnowballStemmer
-from tqdm.autonotebook import tqdm
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.metrics import jaccard_score
 from sklearn.multioutput import ClassifierChain
 from sklearn.preprocessing import MultiLabelBinarizer
+from tqdm.autonotebook import tqdm
 from xgboost import XGBClassifier
 
-# warnings.filterwarnings('ignore')
+warnings.filterwarnings('ignore')
 
 
 class MultiLabelClassifier:
+    """Multi label classifier model based on XGBoost chain."""
+
     def __init__(self, n_estimators=10):
+        """
+        Create a new classifier model instance.
+
+        Args:
+            -n_estimators- number of XGBoost chain links
+            -silent- disables messages during training
+        """
         self.n_estimators = n_estimators
-        param_dist = dict(objective='binary:logistic', use_label_encoder=False, verbosity=0)
+        param_dist = dict(
+            objective='binary:logistic', use_label_encoder=False, verbosity=0
+        )
         self.base_clf = XGBClassifier(**param_dist)
-        self.chains = [ClassifierChain(self.base_clf, order='random', random_state=i)
-                       for i in range(self.n_estimators)]
+        self.chains = [
+            ClassifierChain(self.base_clf, order='random', random_state=i)
+            for i in range(self.n_estimators)
+        ]
         self.mlb = MultiLabelBinarizer()
         self.vect = TfidfVectorizer(
             ngram_range=(1, 3),
             min_df=2,
             max_df=0.5,
-            preprocessor=self.doc_preprocessing
+            preprocessor=self.doc_preprocessing,
         )
         self.constant_filter = VarianceThreshold(threshold=5e-5)
-        with open('stop_stems.txt', 'r', encoding='utf-8') as f:
+        stem_filename = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), 'stop_stems.txt'
+        )
+        try:
+            nltk.data.find('corpora/stopwords')
+        except LookupError:
+            nltk.download('stopwords')
+        try:
+            nltk.data.find('taggers/averaged_perceptron_tagger_ru')
+        except LookupError:
+            nltk.download('averaged_perceptron_tagger_ru')
+        with open(stem_filename, 'r', encoding='utf-8') as f:
             self.stop_stems = f.read().splitlines()
 
     def doc_preprocessing(self, string):
+        """
+        Preprocess one doc from corpus.
+
+        Args:
+            -string- document
+
+        Returns:
+            output- filtered string with accepted stems
+        """
         string = string.lower()
         string = str.replace(string, 'ё', 'е')
         string = re.sub(r'\?+', ' вопрос ', string)
@@ -45,38 +79,109 @@ class MultiLabelClassifier:
         stopwords = nltk.corpus.stopwords.words('russian')
         words = [w for w in words if w not in stopwords or w in ['не', 'нет']]
         functionalPos = {'PRCL', 'CONJ'}
-        words = [w for w, pos in nltk.pos_tag(words, lang='rus') if pos not in functionalPos]
+        words = [
+            w for w, pos in nltk.pos_tag(words, lang='rus') if pos not in functionalPos
+        ]
         stemmer = SnowballStemmer('russian')
         stems = [s for s in map(stemmer.stem, words) if s not in self.stop_stems]
         return ' '.join(stems)
 
     def docs_to_vec(self, X):
+        """
+        Create a new classifier model instance.
+
+        Args:
+            -X- design matrix or corpus
+
+        Returns:
+            output- vectors dataframe
+        """
         X = self.vect.transform(X)
         feature_names = self.vect.get_feature_names()
         df = pd.DataFrame(X.toarray(), columns=feature_names)
         return df
 
-    def fit(self, X, y):
+    def fit(self, X, y, silent=True):
+        """
+        Train model with design matrix X and labels y.
+
+        Args:
+            -X- design matrix
+            -y- comma-separated labels
+            -silent- disables messages during training
+
+        Returns:
+            output- self-instance for further use
+        """
+        if not silent:
+            print('Data preprocessing...')
         one_hot_labels = self.mlb.fit_transform(y.apply(lambda x: x.split(',')))
-        X = self.vect.fit(X.values)
+        self.vect.fit(X)
         X = self.docs_to_vec(X)
         X = self.constant_filter.fit_transform(X)
-        for chain in tqdm(self.chains):
-            chain.fit(X, one_hot_labels)
+        if not silent:
+            print('Training...')
+        if silent:
+            for chain in self.chains:
+                chain.fit(X, one_hot_labels)
+        else:
+            for chain in tqdm(self.chains):
+                chain.fit(X, one_hot_labels)
         return self
 
     def predict_proba(self, X):
+        """
+        Predict the probability of belonging to each class.
+
+        Args:
+            -X- design matrix
+
+        Returns:
+            output- array of probabilities with shape number of samples times number
+            of classes
+        """
         X = self.docs_to_vec(X)
         X = self.constant_filter.transform(X)
         y_pred = np.array([chain.predict(X) for chain in self.chains])
         return y_pred.mean(axis=0)
 
     def predict(self, X, threshold=0.5):
+        """
+        Predict one-hot-encoded labels.
+
+        Args:
+            -X- design matrix
+            -threshold-
+
+        Returns:
+            output- array of zeros and ones with shape number of samples times
+            number of classes
+        """
         return self.predict_proba(X) >= threshold
 
     def predict_labels(self, X, threshold=0.5):
+        """
+        Predict comma separated text labels.
+
+        Args:
+            -X- design matrix
+            -threshold-
+
+        Returns:
+            output- array of comma separated lists of classes names
+        """
         y_pred = self.predict(X, threshold)
         return np.array(map(''.join, self.mlb.inverse_transform(y_pred)))
 
     def score(self, X, y):
+        """
+        Return Jaccard score.
+
+        Args:
+            -X- design matrix
+            -y- true labels
+
+        Returns:
+            output- Jaccard score
+        """
         return jaccard_score(y, self.predict(X))

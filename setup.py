@@ -20,6 +20,7 @@ def parse_requirements() -> tuple:
 setup(
     name='multi_label_classifier',
     packages=find_packages(exclude=('tests',)),
-    python_requires='~=3.7',
+    python_requires='~=3.8',
+    include_package_data=True,
     install_requires=parse_requirements(),
 )
