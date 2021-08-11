@@ -3,8 +3,9 @@
 Класс `MultiLabelClassifier` предназначен для классификации коротких текстов, которые могут одновременно принадлежать нескольким классам.
 
 ## Installing from source
-
-```pip install git+https://github.com/xrustle/multi_label_classifier```
+```console
+pip install git+https://github.com/xrustle/multi_label_classifier
+```
 
 ## Jupyter notebook
 Пример установки и использования при решении задачи классификации инцидентов банкоматов в ноутбуке по ссылке ниже
