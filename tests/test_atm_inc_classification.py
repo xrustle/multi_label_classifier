@@ -50,9 +50,11 @@ class TestAtmIncClassifier:
             random_state=42,
             stratify=df['target'],
         )
-        model = MultiLabelClassifier(n_estimators=10)
+        model = MultiLabelClassifier(n_estimators=1)
         model.fit(X_train, y_train, silent=False)
         y_pred = model.predict(X_test)
         y_test = model.mlb.transform(y_test.apply(lambda x: x.split(',')))
         print(jaccard_score(y_test, y_pred, average='samples').round(decimals=2))
-        assert jaccard_score(y_test, y_pred, average='samples').round(decimals=2) > 0.96
+        assert (
+            jaccard_score(y_test, y_pred, average='samples').round(decimals=2) >= 0.96
+        )

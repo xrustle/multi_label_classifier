@@ -23,7 +23,13 @@ warnings.filterwarnings('ignore')
 class MultiLabelClassifier:
     """Multi label classifier model based on XGBoost chain."""
 
-    def __init__(self, n_estimators=10, var_treshold=5e-5):
+    def __init__(
+        self,
+        n_estimators=10,
+        var_threshold=5e-5,
+        learning_rate=0.5,
+        explained_variance_ratio=0.99,
+    ):
         """
         Create a new classifier model instance.
 
@@ -32,7 +38,9 @@ class MultiLabelClassifier:
             -silent- disables messages during training
         """
         self.n_estimators = n_estimators
+        self.explained_variance_ratio = explained_variance_ratio
         param_dist = dict(
+            learning_rate=learning_rate,
             objective='binary:logistic',
             use_label_encoder=False,
             verbosity=0,
@@ -51,7 +59,7 @@ class MultiLabelClassifier:
             max_df=0.5,
             preprocessor=self.doc_preprocessing,
         )
-        self.constant_filter = VarianceThreshold(threshold=var_treshold)
+        self.constant_filter = VarianceThreshold(threshold=var_threshold)
         self.pca = PCA(svd_solver='full')
         stem_filename = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), 'stop_stems.txt'
@@ -123,20 +131,23 @@ class MultiLabelClassifier:
             print('Data preprocessing...')
         one_hot_labels = self.mlb.fit_transform(y.apply(lambda x: x.split(',')))
         self.vect.fit(X)
-        X = self.docs_to_vec(X)
-        X = self.constant_filter.fit_transform(X)
-        X = self.pca.fit_transform(X)
-        n_features = np.argmax(self.pca.explained_variance_ratio_.cumsum() > 0.99)
+        x_train = self.docs_to_vec(X)
+        self.constant_filter.fit(x_train)
+        x_train = self.constant_filter.transform(x_train)
+        self.pca.fit(x_train)
+        n_features = np.argmax(
+            self.pca.explained_variance_ratio_.cumsum() > self.explained_variance_ratio
+        )
         self.pca = PCA(n_components=n_features, svd_solver='full')
-        X = self.pca.fit_transform(X)
+        x_train = self.pca.fit_transform(x_train)
         if not silent:
             print('Training...')
         if silent:
             for chain in self.chains:
-                chain.fit(X, one_hot_labels)
+                chain.fit(x_train, one_hot_labels)
         else:
             for chain in tqdm(self.chains):
-                chain.fit(X, one_hot_labels)
+                chain.fit(x_train, one_hot_labels)
         return self
 
     def predict_proba(self, X):
@@ -150,10 +161,10 @@ class MultiLabelClassifier:
             output- array of probabilities with shape number of samples times number
             of classes
         """
-        X = self.docs_to_vec(X)
-        X = self.constant_filter.transform(X)
-        X = self.pca.transform(X)
-        y_pred = np.array([chain.predict(X) for chain in self.chains])
+        x_test = self.docs_to_vec(X)
+        x_test = self.constant_filter.transform(x_test)
+        x_test = self.pca.transform(x_test)
+        y_pred = np.array([chain.predict_proba(x_test) for chain in self.chains])
         return y_pred.mean(axis=0)
 
     def predict(self, X, threshold=0.5):
