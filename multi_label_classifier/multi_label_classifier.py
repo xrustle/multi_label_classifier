@@ -180,7 +180,12 @@ class MultiLabelClassifier:
             output- array of zeros and ones with shape number of samples times
             number of classes
         """
-        return self.predict_proba(X) >= threshold
+        y_pred = self.predict_proba(X) >= threshold
+        if 'empty' in self.mlb.classes_:
+            empty = self.mlb.transform([['empty']])[0] == 1
+            y_pred_sum = y_pred.sum(axis=1)
+            y_pred[y_pred_sum == 0] = empty
+        return y_pred
 
     def predict_labels(self, X, threshold=0.5):
         """
