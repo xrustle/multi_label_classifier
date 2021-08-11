@@ -8,12 +8,13 @@ import nltk
 import numpy as np
 import pandas as pd
 from nltk.stem.snowball import SnowballStemmer
+from sklearn.decomposition import PCA
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.metrics import jaccard_score
 from sklearn.multioutput import ClassifierChain
 from sklearn.preprocessing import MultiLabelBinarizer
-from tqdm.autonotebook import tqdm
+from tqdm.auto import tqdm
 from xgboost import XGBClassifier
 
 warnings.filterwarnings('ignore')
@@ -22,17 +23,21 @@ warnings.filterwarnings('ignore')
 class MultiLabelClassifier:
     """Multi label classifier model based on XGBoost chain."""
 
-    def __init__(self, n_estimators=10):
+    def __init__(self, n_estimators=10, var_treshold=5e-5):
         """
         Create a new classifier model instance.
 
         Args:
-            -n_estimators- number of XGBoost chain links
+            -n_estimators- number of ChainClassifiers
             -silent- disables messages during training
         """
         self.n_estimators = n_estimators
         param_dist = dict(
-            objective='binary:logistic', use_label_encoder=False, verbosity=0
+            objective='binary:logistic',
+            use_label_encoder=False,
+            verbosity=0,
+            gpu_id=0,
+            tree_method='gpu_hist',
         )
         self.base_clf = XGBClassifier(**param_dist)
         self.chains = [
@@ -46,7 +51,8 @@ class MultiLabelClassifier:
             max_df=0.5,
             preprocessor=self.doc_preprocessing,
         )
-        self.constant_filter = VarianceThreshold(threshold=5e-5)
+        self.constant_filter = VarianceThreshold(threshold=var_treshold)
+        self.pca = PCA(svd_solver='full')
         stem_filename = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), 'stop_stems.txt'
         )
@@ -119,6 +125,10 @@ class MultiLabelClassifier:
         self.vect.fit(X)
         X = self.docs_to_vec(X)
         X = self.constant_filter.fit_transform(X)
+        X = self.pca.fit_transform(X)
+        n_features = np.argmax(self.pca.explained_variance_ratio_.cumsum() > 0.99)
+        self.pca = PCA(n_components=n_features, svd_solver='full')
+        X = self.pca.fit_transform(X)
         if not silent:
             print('Training...')
         if silent:
@@ -142,6 +152,7 @@ class MultiLabelClassifier:
         """
         X = self.docs_to_vec(X)
         X = self.constant_filter.transform(X)
+        X = self.pca.transform(X)
         y_pred = np.array([chain.predict(X) for chain in self.chains])
         return y_pred.mean(axis=0)
 
@@ -171,7 +182,7 @@ class MultiLabelClassifier:
             output- array of comma separated lists of classes names
         """
         y_pred = self.predict(X, threshold)
-        return np.array(map(''.join, self.mlb.inverse_transform(y_pred)))
+        return np.array(list(map(','.join, self.mlb.inverse_transform(y_pred))))
 
     def score(self, X, y):
         """
@@ -184,4 +195,5 @@ class MultiLabelClassifier:
         Returns:
             output- Jaccard score
         """
-        return jaccard_score(y, self.predict(X))
+        y_true = self.mlb.transform(y.apply(lambda x: x.split(',')))
+        return jaccard_score(y_true, self.predict(X))

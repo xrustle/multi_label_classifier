@@ -3,7 +3,6 @@
 import os
 
 import pandas as pd
-import pytest
 from sklearn.metrics import jaccard_score
 from sklearn.model_selection import train_test_split
 
@@ -54,10 +53,6 @@ class TestAtmIncClassifier:
         model = MultiLabelClassifier(n_estimators=10)
         model.fit(X_train, y_train, silent=False)
         y_pred = model.predict(X_test)
+        y_test = model.mlb.transform(y_test.apply(lambda x: x.split(',')))
         print(jaccard_score(y_test, y_pred, average='samples').round(decimals=2))
         assert jaccard_score(y_test, y_pred, average='samples').round(decimals=2) > 0.96
-
-    def test_method_type_error(self):
-        """Test raising TypeError."""
-        with pytest.raises(TypeError):
-            jaccard_score([1], [2])
