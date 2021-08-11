@@ -46,6 +46,7 @@ class MultiLabelClassifier:
             verbosity=0,
             gpu_id=0,
             tree_method='gpu_hist',
+            predictor='cpu_predictor',
         )
         self.base_clf = XGBClassifier(**param_dist)
         self.chains = [
